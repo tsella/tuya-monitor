@@ -4,6 +4,7 @@
 the LAN protocol, one SQLite file per device, graphs on demand, alerts when a reading goes
 wrong — no IoT Platform project, no subscription, no cloud round-trip per sample.
 
+[![tests](https://github.com/tsella/tuya-monitor/actions/workflows/tests.yml/badge.svg)](https://github.com/tsella/tuya-monitor/actions/workflows/tests.yml)
 ![python](https://img.shields.io/badge/python-3.12%2B-3d7a80)
 ![license](https://img.shields.io/badge/license-MIT-2f6f4f)
 ![runtime](https://img.shields.io/badge/cloud--free_at_runtime-5cc8ff)
