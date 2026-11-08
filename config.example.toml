@@ -1,0 +1,11 @@
+# ~/.config/tuya-monitor/config.toml — chmod 600
+api_key = "change-me"
+bind = "127.0.0.1"
+port = 8765
+poll_interval = 30
+retention_days = 400
+report_retention_days = 30
+cooldown_min = 30
+baseline_days = 7
+anomaly_enabled = true
+timezone = "America/New_York"

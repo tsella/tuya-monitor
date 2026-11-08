@@ -1,0 +1,14 @@
+[project]
+name = "tuya-monitor"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "matplotlib>=3.9",
+    "tinytuya>=1.20",
+    "qrcode[pil]>=7.4",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,45 @@
+# Runbook
+
+## Device stopped reporting
+
+`monitor.cli devices` shows `fail=N` and `last_error`. The collector disables a device
+after 5 consecutive failures and raises a `device_offline` alert.
+
+1. `journalctl --user -u tuya-monitor-collect -n 50` — read the actual error.
+2. Ping the IP; check it still holds the DHCP lease (`ip neigh | grep <mac>`).
+3. `monitor.cli verify <dev_id>` — a `914` means the key rotated (re-pair needed), a
+   `904` means framing, a timeout means the device is off the network.
+4. Re-pair if the key is stale: `monitor.cli pair`, approve, then `verify`.
+
+## Key rotated (device re-paired in the app)
+
+`localKey` changes on every re-pair and nothing can derive it locally. Run the pairing
+flow again — the row is updated in place, history is untouched.
+
+## Alert storm
+
+Cooldowns are per rule; a spike in noise usually means a threshold is wrong for the room.
+Adjust `THRESHOLDS` in `monitor/config.py`, then `systemctl --user restart
+tuya-monitor-collect`. Silence all rules temporarily with `anomaly_enabled = false`.
+
+## Disk pressure
+
+Samples are the only thing that grows. `monitor.cli prune` drops rows past
+`retention_days` and PNGs past 30 days. If space is still tight, lower `retention_days`
+and prune again; per-device files mean you can also just delete the noisiest one.
+
+## API unreachable
+
+`systemctl --user status tuya-monitor-api`. Collection is independent of the API; a dead
+API does not stop data.
+
+## Cloud path broken (pairing fails)
+
+A `SING_VALIDATE_FALED_4` means the app identity in `monitor/config.py` is stale — the
+constants come from the app build, so re-extract them per the
+`tuya-app-api-local-key` skill. Existing devices keep collecting regardless.
+
+## Rotating the API key
+
+Edit `api_key` in `~/.config/tuya-monitor/config.toml`, `systemctl --user restart
+tuya-monitor-api`. Empty string disables auth entirely (localhost only).
