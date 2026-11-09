@@ -39,9 +39,11 @@ DP_META = {
 # Defaults shipped with the code; [thresholds.<kind>] in the config file overrides any of
 # them field by field. Values are in the DP's own unit (CO₂ ppm, °C, % RH).
 DEFAULT_THRESHOLDS = {
-    "co2": {"warn": 1000.0, "alert": 1500.0, "floor": 120.0},
-    "temp": {"warn_low": 5.0, "warn_high": 30.0, "alert_low": 0.0, "alert_high": 40.0, "floor": 1.5},
-    "humidity": {"warn_low": 30.0, "warn_high": 60.0, "alert_low": 20.0, "alert_high": 70.0, "floor": 5.0},
+    "co2": {"warn": 1000.0, "alert": 1500.0, "floor": 120.0, "min_span": 60.0},
+    "temp": {"warn_low": 5.0, "warn_high": 30.0, "alert_low": 0.0, "alert_high": 40.0,
+             "floor": 1.5, "min_span": 2.0},
+    "humidity": {"warn_low": 30.0, "warn_high": 60.0, "alert_low": 20.0, "alert_high": 70.0,
+                 "floor": 5.0, "min_span": 5.0},
 }
 THRESHOLDS = DEFAULT_THRESHOLDS  # backwards-compatible alias
 

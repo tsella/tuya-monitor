@@ -116,8 +116,14 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
         ax.plot(ts, avg, color=ACCENT, lw=1.6)
 
         lo_v, hi_v = min(lo), max(hi)
-        span_v = (hi_v - lo_v) or max(abs(hi_v) * 0.04, 1.0)
-        band_lo, band_hi = lo_v - span_v * 0.12, hi_v + span_v * 0.12
+        th = config.THRESHOLDS.get(kind) or {}
+        # floor the window, not just the padding: a 3-point axis turns integer jitter into
+        # fake drama, so a minimum span centred on the data is enforced per kind
+        center = (hi_v + lo_v) / 2
+        half = max(hi_v - lo_v, th.get("min_span", 0.0), abs(hi_v) * 0.02, 0.5) / 2
+        pad = half * 0.1
+        band_lo, band_hi = center - half - pad, center + half + pad
+        span_v = band_hi - band_lo
         ax.set_ylim(band_lo, band_hi)
         if len(rows) > 1:
             _paint(ax, band_lo, band_hi, settings.thresholds.get(kind) or {}, xform)
