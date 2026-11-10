@@ -39,11 +39,11 @@ DP_META = {
 # Defaults shipped with the code; [thresholds.<kind>] in the config file overrides any of
 # them field by field. Values are in the DP's own unit (CO₂ ppm, °C, % RH).
 DEFAULT_THRESHOLDS = {
-    "co2": {"warn": 1000.0, "alert": 1500.0, "floor": 120.0, "min_span": 60.0},
-    "temp": {"warn_low": 5.0, "warn_high": 30.0, "alert_low": 0.0, "alert_high": 40.0,
-             "floor": 1.5, "min_span": 2.0},
-    "humidity": {"warn_low": 30.0, "warn_high": 60.0, "alert_low": 20.0, "alert_high": 70.0,
-                 "floor": 5.0, "min_span": 5.0},
+    "co2": {"warn": 1200.0, "alert": 1800.0, "floor": 150.0, "min_span": 60.0},
+    "temp": {"warn_low": 5.0, "warn_high": 31.0, "alert_low": 0.0, "alert_high": 40.0,
+             "floor": 3.0, "min_span": 2.0},
+    "humidity": {"warn_low": 25.0, "warn_high": 65.0, "alert_low": 18.0, "alert_high": 75.0,
+                 "floor": 8.0, "min_span": 5.0},
 }
 THRESHOLDS = DEFAULT_THRESHOLDS  # backwards-compatible alias
 
@@ -66,7 +66,8 @@ class Settings:
     poll_interval: float = 30.0
     retention_days: int = 0          # 0 = keep everything
     report_retention_days: int = 30
-    cooldown_min: int = 30
+    cooldown_min: int = 120        # per rule, before severity scaling
+    confirm_samples: int = 3       # consecutive violating polls before an alert
     anomaly_enabled: bool = True
     baseline_days: int = 7
     temp_unit: str = "both"          # c | f | both
@@ -84,7 +85,7 @@ def load() -> Settings:
             cfg = tomllib.load(fh)
     s = Settings()
     for key in ("bind", "port", "api_key", "poll_interval", "retention_days",
-                "report_retention_days", "cooldown_min", "anomaly_enabled",
+                "report_retention_days", "cooldown_min", "confirm_samples", "anomaly_enabled",
                 "baseline_days", "temp_unit", "timezone"):
         if key in cfg:
             setattr(s, key, cfg[key])

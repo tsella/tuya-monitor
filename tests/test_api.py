@@ -57,3 +57,9 @@ def test_alerts_endpoint_and_ack():
 def test_graph_rejects_bad_range():
     store.add_device("dev1", "Sensor", "192.0.2.5", "k" * 16, category="co2bj")
     assert client().get("/devices/dev1/graph.png?start=10&end=5").status_code == 400
+
+
+def test_settings_expose_the_anti_noise_knobs():
+    body = client().get("/settings").json()
+    assert body["confirm_samples"] >= 1
+    assert body["cooldown_min"] >= 30

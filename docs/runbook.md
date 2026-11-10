@@ -43,3 +43,20 @@ constants come from the app build, so re-extract them per the
 
 Edit `api_key` in `~/.config/tuya-monitor/config.toml`, `systemctl --user restart
 tuya-monitor-api`. Empty string disables auth entirely (localhost only).
+
+## Alert tuning
+
+A monitor that cries wolf gets muted, so three brakes stand in front of every alert. All three
+are config values; `config.example.toml` documents the defaults.
+
+- `confirm_samples` (default 3) — the value must violate the rule on that many consecutive
+  polls. Polls are 30 s apart, so a stray sample cannot fire, and the streak resets the moment
+  the value comes back into bounds.
+- `cooldown_min` (default 120) — multiplied per rule: alerts 1×, warnings 2×, baseline hits 3×.
+  "Unusual for this hour" is the noisiest rule, so it stays quiet for six hours.
+- Baseline band is `max(5 × MAD, floor)` with floors of 150 ppm CO₂, 3 °C, 8 %RH. The floors
+  matter more than the MAD term for a well-behaved room: a median-absolute-deviation band on
+  indoor temperature shrinks to about 0.5 °C and flags ordinary afternoon warmth.
+
+Symptom to watch for: a rule re-firing on the same value every cooldown. That is a threshold
+sitting inside the daily range, not an anomaly — move the edge, do not shorten the cooldown.
