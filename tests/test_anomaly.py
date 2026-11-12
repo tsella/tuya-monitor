@@ -113,3 +113,35 @@ def test_baseline_cools_down_longest():
     assert (anomaly._COOLDOWN_FACTOR["baseline"]
             > anomaly._COOLDOWN_FACTOR["static_range_warn"]
             > anomaly._COOLDOWN_FACTOR["static_range_alert"])
+
+
+def _baseline_rows(now, dp, median):
+    day = 86400
+    return [(now - d * day, dp, median + (d % 2), None) for d in range(1, 26)]
+
+
+def test_rain_widens_the_humidity_band(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "19", 30.0))
+    monkeypatch.setattr(anomaly.weather, "outdoor",
+                        lambda s: {"rh": 88.0, "temp": 12.0, "precip": 1.2, "ts": now})
+    # 45 % is 15 points over the dry-hour median: suppressed while it rains outside
+    assert [g for g in anomaly.evaluate(dev, {"19": 45}, settings, ts=now) if g["rule"] == "baseline"] == []
+
+
+def test_dry_day_keeps_the_humidity_baseline(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "19", 30.0))
+    monkeypatch.setattr(anomaly.weather, "outdoor",
+                        lambda s: {"rh": 40.0, "temp": 22.0, "precip": 0.0, "ts": now})
+    got = [g for g in anomaly.evaluate(dev, {"19": 45}, settings, ts=now) if g["rule"] == "baseline"]
+    assert got and "outside 40% RH" in got[0]["message"]
+
+
+def test_wetness_predicate():
+    assert anomaly.weather.is_wet({"rh": 90.0, "precip": 0.0, "ts": 0}) is True
+    assert anomaly.weather.is_wet({"rh": 90.0, "precip": 0.5, "ts": 0}) is True
+    assert anomaly.weather.is_wet({"rh": 40.0, "precip": 0.0, "ts": 0}) is False
+    assert anomaly.weather.is_wet(None) is False

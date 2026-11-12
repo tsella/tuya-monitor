@@ -69,6 +69,9 @@ class Settings:
     cooldown_min: int = 120        # per rule, before severity scaling
     confirm_samples: int = 3       # consecutive violating polls before an alert
     anomaly_enabled: bool = True
+    weather_enabled: bool = True   # outside conditions damp weather-driven indoor swings
+    weather_lat: float = 40.7453
+    weather_lon: float = -73.9782
     baseline_days: int = 7
     temp_unit: str = "both"          # c | f | both
     timezone: str = "America/New_York"
@@ -85,7 +88,7 @@ def load() -> Settings:
             cfg = tomllib.load(fh)
     s = Settings()
     for key in ("bind", "port", "api_key", "poll_interval", "retention_days",
-                "report_retention_days", "cooldown_min", "confirm_samples", "anomaly_enabled",
+                "report_retention_days", "cooldown_min", "confirm_samples", "anomaly_enabled", "weather_enabled", "weather_lat", "weather_lon",
                 "baseline_days", "temp_unit", "timezone"):
         if key in cfg:
             setattr(s, key, cfg[key])

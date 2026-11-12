@@ -205,7 +205,7 @@ def get_settings() -> dict:
     return {"bind": settings.bind, "port": settings.port, "poll_interval": settings.poll_interval,
             "retention_days": settings.retention_days, "temp_unit": settings.temp_unit,
             "cooldown_min": settings.cooldown_min, "confirm_samples": settings.confirm_samples,
-            "anomaly_enabled": settings.anomaly_enabled,
+            "anomaly_enabled": settings.anomaly_enabled, "weather_enabled": settings.weather_enabled,
             "thresholds": settings.thresholds}
 
 

@@ -11,7 +11,7 @@ import statistics
 import time
 from typing import Any
 
-from . import config, realtime, store
+from . import config, realtime, store, weather
 
 CONFIRM = "confirm"
 
@@ -89,6 +89,9 @@ def evaluate(dev: dict, dps: dict[str, Any], settings: config.Settings,
     if not settings.anomaly_enabled:
         return []
     ts = ts or int(time.time())
+    ctx = weather.outdoor(settings)
+    wet = weather.is_wet(ctx)
+    outside = weather.note(ctx)
     out: list[dict] = []
     for dp, raw in dps.items():
         try:
@@ -107,6 +110,12 @@ def evaluate(dev: dict, dps: dict[str, Any], settings: config.Settings,
         shown = _fmt(value, kind, unit, settings)
         matched: set[str] = set()
 
+        if wet and kind == "humidity":
+            # rain outside lifts indoor humidity: expect more of it before calling it odd
+            th = {**th, "warn_high": th.get("warn_high", 0.0) + 10.0,
+                  "alert_high": th.get("alert_high", 0.0) + 10.0,
+                  "floor": th.get("floor", 0.0) * 1.8}
+
         if "warn" in th and value >= th["warn"]:
             sev = "alert" if value >= th["alert"] else "warn"
             rule = f"static_high_{sev}"
@@ -123,19 +132,21 @@ def evaluate(dev: dict, dps: dict[str, Any], settings: config.Settings,
             edge = th["warn_high"] if value >= th["warn_high"] else th["warn_low"]
             band = f"{_fmt(th['warn_low'], kind, unit, settings)}–{_fmt(th['warn_high'], kind, unit, settings)}"
             got = _emit(dev, dp, rule, sev, value, edge,
-                        f"{prefix} at {shown}, outside {band}", settings)
+                        f"{prefix} at {shown}, outside {band}{outside}", settings)
             if got:
                 out.append(got)
 
         med, mad, n = _baseline(dev["dev_id"], dp, ts, settings.baseline_days)
         if n >= BASELINE_MIN_POINTS:
-            band = max(BASELINE_MAD * mad, th.get("floor", 0.0))
+            scale = 1.80 if (wet and kind == "humidity") else 1.45 if (wet and kind == "temp") else 1.0
+            band = max(BASELINE_MAD * mad, th.get("floor", 0.0)) * scale
             if abs(value - med) > band:
                 matched.add("baseline")
                 sev = "alert" if abs(value - med) > band * 2.5 else "warn"
                 got = _emit(dev, dp, "baseline", sev, value, med,
                             f"{prefix} at {shown}, unusual for this hour "
-                            f"(median {_fmt(med, kind, unit, settings)}, {n} samples)", settings)
+                            f"(median {_fmt(med, kind, unit, settings)}, {n} samples){outside}",
+                            settings)
                 if got:
                     out.append(got)
 

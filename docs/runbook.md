@@ -60,3 +60,17 @@ are config values; `config.example.toml` documents the defaults.
 
 Symptom to watch for: a rule re-firing on the same value every cooldown. That is a threshold
 sitting inside the daily range, not an anomaly — move the edge, do not shorten the cooldown.
+
+## Weather context
+
+The room follows the weather. A rainy day lifts indoor humidity 15–20 points and drops the
+temperature, which the baseline rule otherwise reads as an anomaly. So the collector fetches
+outside conditions (open-meteo, 15-minute cache, `weather_lat/lon`) and uses them:
+
+- rain or outdoor RH ≥ 65 % widens the humidity band 1.8× and raises the humidity edges by ten
+  points, and widens the temperature band 1.45× — the swing is expected, not a fault;
+- every alert carries the outside reading, e.g. `(outside 88% RH, rain)`, so a later reader can
+  tell weather from a plumbing leak even after the fact.
+
+`weather_enabled = false` restores the weather-blind rules. A failed lookup behaves the same
+way — context is never allowed to block an alert.
