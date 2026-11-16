@@ -7,15 +7,21 @@ in the room".
 from __future__ import annotations
 
 import json
+import logging
 import time
 import urllib.parse
 import urllib.request
 
 from . import config
 
+log = logging.getLogger("tuya-monitor.weather")
+
 _cache: dict[str, tuple[float, dict | None]] = {}
+_last_good: dict[str, tuple[float, dict]] = {}
 
 TTL = 900          # seconds; a forecast does not move faster than this
+FAIL_TTL = 120     # a failed lookup is retried sooner than a good one is refreshed
+STALE_MAX = 3600   # how long the last good reading may stand in while lookups fail
 WET_RH = 65.0      # outdoor RH at which indoor humidity rise is expected
 
 
@@ -45,11 +51,27 @@ def outdoor(settings: config.Settings) -> dict | None:
         return None
     key = f"{settings.weather_lat},{settings.weather_lon}"
     hit = _cache.get(key)
-    if hit and time.time() - hit[0] < TTL:
-        return hit[1]
+    if hit:
+        age = time.time() - hit[0]
+        if hit[1] is not None and age < TTL:
+            return hit[1]
+        if hit[1] is None and age < FAIL_TTL:
+            return _stale(key)
     got = _fetch(settings)
     _cache[key] = (time.time(), got)
-    return got
+    if got is None:
+        log.warning("weather lookup failed for %s", key)
+    else:
+        _last_good[key] = (time.time(), got)
+    return got if got is not None else _stale(key)
+
+
+def _stale(key: str) -> dict | None:
+    """The last good reading, while it is still young enough to mean something."""
+    good = _last_good.get(key)
+    if good and time.time() - good[0] < STALE_MAX:
+        return {**good[1], "stale": True}
+    return None
 
 
 def is_wet(ctx: dict | None) -> bool:
@@ -59,7 +81,7 @@ def is_wet(ctx: dict | None) -> bool:
 def note(ctx: dict | None) -> str:
     if not ctx:
         return ""
-    bits = [f"outside {ctx['rh']:.0f}% RH"]
+    bits = [f"outside {ctx['temp']:.0f}°C", f"{ctx['rh']:.0f}% RH"]
     if ctx["precip"] > 0:
         bits.append("rain")
     return " (" + ", ".join(bits) + ")"

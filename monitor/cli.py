@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--label"); g.set_defaults(fn=cmd_graph)
     r = sub.add_parser("report"); r.add_argument("kind", choices=["daily", "weekly"]); r.set_defaults(fn=cmd_report)
     n = sub.add_parser("notify"); n.add_argument("--json", action="store_true")
-    n.add_argument("--limit", type=int, default=50); n.add_argument("--include-quiet", action="store_true")
+    n.add_argument("--limit", type=int, default=50); n.add_argument("--include-quiet", action="store_true"); n.add_argument("path", nargs="?", default=None)
     n.set_defaults(fn=cmd_notify)
     sub.add_parser("prune").set_defaults(fn=cmd_prune)
 

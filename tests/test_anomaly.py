@@ -137,7 +137,7 @@ def test_dry_day_keeps_the_humidity_baseline(settings, monkeypatch):
     monkeypatch.setattr(anomaly.weather, "outdoor",
                         lambda s: {"rh": 40.0, "temp": 22.0, "precip": 0.0, "ts": now})
     got = [g for g in anomaly.evaluate(dev, {"19": 45}, settings, ts=now) if g["rule"] == "baseline"]
-    assert got and "outside 40% RH" in got[0]["message"]
+    assert got and "22°C, 40% RH" in got[0]["message"]
 
 
 def test_wetness_predicate():
@@ -145,3 +145,45 @@ def test_wetness_predicate():
     assert anomaly.weather.is_wet({"rh": 90.0, "precip": 0.5, "ts": 0}) is True
     assert anomaly.weather.is_wet({"rh": 40.0, "precip": 0.0, "ts": 0}) is False
     assert anomaly.weather.is_wet(None) is False
+
+
+def test_cold_outside_explains_a_cold_room(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "18", 24.0))
+    monkeypatch.setattr(anomaly.weather, "outdoor",
+                        lambda s: {"rh": 60.0, "temp": 9.0, "precip": 0.0, "ts": now})
+    got = [g for g in anomaly.evaluate(dev, {"18": 20.0}, settings, ts=now) if g["rule"] == "baseline"]
+    assert got == []
+
+
+def test_mild_outside_keeps_the_temperature_baseline(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "18", 24.0))
+    monkeypatch.setattr(anomaly.weather, "outdoor",
+                        lambda s: {"rh": 55.0, "temp": 22.0, "precip": 0.0, "ts": now})
+    got = [g for g in anomaly.evaluate(dev, {"18": 20.0}, settings, ts=now) if g["rule"] == "baseline"]
+    assert got and "outside 22°C" in got[0]["message"]
+
+
+def test_a_failed_lookup_falls_back_to_the_last_good_reading(monkeypatch):
+    from monitor import weather as w
+
+    s = config.Settings()
+    w.reset_cache()
+    w._last_good["40.7453,-73.9782"] = (time.time(), {"rh": 71.0, "temp": 8.0, "precip": 0.0, "ts": 0})
+    monkeypatch.setattr(w, "_fetch", lambda settings: None)
+    got = w.outdoor(s)
+    assert got and got["temp"] == 8.0 and got["stale"] is True
+
+
+def test_a_stale_reading_expires(monkeypatch):
+    from monitor import weather as w
+
+    s = config.Settings()
+    w.reset_cache()
+    w._last_good["40.7453,-73.9782"] = (time.time() - w.STALE_MAX - 5,
+                                        {"rh": 71.0, "temp": 8.0, "precip": 0.0, "ts": 0})
+    monkeypatch.setattr(w, "_fetch", lambda settings: None)
+    assert w.outdoor(s) is None

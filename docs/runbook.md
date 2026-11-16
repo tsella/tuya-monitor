@@ -68,9 +68,15 @@ temperature, which the baseline rule otherwise reads as an anomaly. So the colle
 outside conditions (open-meteo, 15-minute cache, `weather_lat/lon`) and uses them:
 
 - rain or outdoor RH ≥ 65 % widens the humidity band 1.8× and raises the humidity edges by ten
-  points, and widens the temperature band 1.45× — the swing is expected, not a fault;
+  points; wind and rain widen the temperature band 1.45×, and outside at 12 °C or below widens it
+  1.9× — a cold snap drags the room down and must not read as a fault;
 - every alert carries the outside reading, e.g. `(outside 88% RH, rain)`, so a later reader can
   tell weather from a plumbing leak even after the fact.
 
-`weather_enabled = false` restores the weather-blind rules. A failed lookup behaves the same
-way — context is never allowed to block an alert.
+`weather_enabled = false` restores the weather-blind rules.
+
+A failed lookup is not allowed to blind the rules: the last good reading stands in for up to an
+hour (flagged `stale`), a failure is retried after two minutes rather than the usual fifteen, and
+the failure is logged to the journal. Before that, one blip silenced the context for a quarter of
+an hour and let a cold-snap alert through unannotated — which is exactly the alert that opened
+this section.

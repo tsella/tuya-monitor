@@ -91,6 +91,8 @@ def evaluate(dev: dict, dps: dict[str, Any], settings: config.Settings,
     ts = ts or int(time.time())
     ctx = weather.outdoor(settings)
     wet = weather.is_wet(ctx)
+    # a cold snap outside drags the room down: expect it rather than call it odd
+    cold = bool(ctx) and (ctx["temp"] <= 12.0)
     outside = weather.note(ctx)
     out: list[dict] = []
     for dp, raw in dps.items():
@@ -138,7 +140,11 @@ def evaluate(dev: dict, dps: dict[str, Any], settings: config.Settings,
 
         med, mad, n = _baseline(dev["dev_id"], dp, ts, settings.baseline_days)
         if n >= BASELINE_MIN_POINTS:
-            scale = 1.80 if (wet and kind == "humidity") else 1.45 if (wet and kind == "temp") else 1.0
+            scale = 1.0
+            if kind == "humidity" and wet:
+                scale = 1.8
+            elif kind == "temp":
+                scale = 1.9 if cold else 1.45 if wet else 1.0
             band = max(BASELINE_MAD * mad, th.get("floor", 0.0)) * scale
             if abs(value - med) > band:
                 matched.add("baseline")
