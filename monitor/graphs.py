@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import time
+
+import numpy as np
 from datetime import datetime
 from pathlib import Path
 
@@ -9,10 +11,11 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.dates as mdates  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 
-from . import config, realtime, store  # noqa: E402
+from . import config, realtime, store, weather  # noqa: E402
 
 INK = "#e8e8ea"
 MUTED = "#9aa0a6"
@@ -21,6 +24,29 @@ BG = "#14161a"
 ACCENT = "#5cc8ff"
 WARN = "#f5a524"
 ALERT = "#f0533f"
+OUTSIDE = "#8b93a7"          # the world outside the window
+AQI_BANDS = ((20, "#4caf50"), (40, "#cddc39"), (60, "#ffc107"),
+             (80, "#ff7043"), (100, "#e53935"), (10_000, "#8e24aa"))
+
+# WMO weather codes, as glyphs the default font actually has
+SYMBOLS = ((0, "☀"), (2, "☀"), (3, "☁"), (48, "≡"), (57, "☂"), (67, "☂"),
+           (77, "❄"), (82, "☂"), (99, "⚡"))
+
+
+def _symbol(code: float | None) -> str:
+    if code is None:
+        return ""
+    for top, glyph in SYMBOLS:
+        if code <= top:
+            return glyph
+    return ""
+
+
+def _aqi_colour(aqi: float | None) -> str:
+    for top, colour in AQI_BANDS:
+        if aqi is not None and aqi <= top:
+            return colour
+    return OUTSIDE
 
 RULE_KEYS = (("warn", WARN), ("warn_high", WARN), ("warn_low", WARN),
              ("alert", ALERT), ("alert_high", ALERT), ("alert_low", ALERT))
@@ -90,13 +116,26 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
     if not panels:
         raise ValueError("no numeric samples in range")
 
+    # the outside world, for the panels it explains: temperature and humidity only
+    wants_out = any(realtime.meta_for(category, dp).get("kind") in ("temp", "humidity")
+                    for dp, _ in panels)
+    outside = weather.history(settings, start, end) if wants_out else None
+    if outside and not outside["ts"]:
+        outside = None
+
     plt.rcParams.update({
         "figure.facecolor": BG, "axes.facecolor": BG, "savefig.facecolor": BG,
         "text.color": INK, "axes.labelcolor": INK, "xtick.color": MUTED,
         "ytick.color": MUTED, "axes.edgecolor": GRID, "font.size": 9,
     })
-    fig, axes = plt.subplots(len(panels), 1, figsize=(11, 2.5 * len(panels) + 1.3),
-                             sharex=True, squeeze=False)
+    rows_n = len(panels) + (1 if outside else 0)
+    heights = [1.0] * len(panels) + ([0.18] if outside else [])
+    fig = plt.figure(figsize=(11, 2.5 * len(panels) + (0.8 if outside else 0) + 1.3))
+    gs = fig.add_gridspec(rows_n, 1, height_ratios=heights, hspace=0.16)
+    axes = np.array([[fig.add_subplot(gs[i, 0])] for i in range(len(panels))])
+    for ax in axes[:, 0][:-1]:
+        ax.sharex(axes[-1, 0])
+    strip = fig.add_subplot(gs[-1, 0], sharex=axes[0, 0]) if outside else None
     for ax, (dp, rows) in zip(axes[:, 0], panels):
         meta = realtime.meta_for(category, dp)
         kind = meta.get("kind", "")
@@ -116,6 +155,17 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
         ax.plot(ts, avg, color=ACCENT, lw=1.6)
 
         lo_v, hi_v = min(lo), max(hi)
+        outside_line = None
+        if outside:
+            key = "temperature_2m" if kind == "temp" else "relative_humidity_2m" if kind == "humidity" else None
+            if key:
+                pts = [(datetime.fromtimestamp(t), xform(v)) for t, v in zip(outside["ts"], outside[key])
+                       if v is not None]
+                if pts:
+                    xs, ys = zip(*pts)
+                    outside_line, = ax.plot(xs, ys, color=OUTSIDE, lw=1.2, ls=(0, (4, 3)),
+                                            alpha=0.9, label="outside")
+                    lo_v, hi_v = min(lo_v, min(ys)), max(hi_v, max(ys))
         th = config.THRESHOLDS.get(kind) or {}
         # floor the window, not just the padding: a 3-point axis turns integer jitter into
         # fake drama, so a minimum span centred on the data is enforced per kind
@@ -135,6 +185,10 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
             title += f" ({unit})"
         ax.set_title(title, loc="left", fontsize=10, color=INK, pad=8)
         ax.set_ylabel(unit or "value", fontsize=9, color=MUTED)
+        if outside_line is not None:
+            outside_handle = outside_line
+        if strip is not None:
+            ax.tick_params(axis="x", labelbottom=False)
         ax.grid(True, color=GRID, lw=0.6, alpha=0.7)
         ax.yaxis.set_major_locator(MaxNLocator(4))
         ax.tick_params(labelsize=8)
@@ -148,7 +202,35 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
             sec.spines["right"].set_visible(True)
             sec.spines["right"].set_color(GRID)
 
-    ax = axes[-1, 0]
+    # the outside strip: what the weather was doing, and how the air read
+    if strip is not None and outside:
+        step = max(1, len(outside["ts"]) // 48)
+        for t_, code in list(zip(outside["ts"], outside["weather_code"]))[::step]:
+            glyph = _symbol(code)
+            if glyph:
+                strip.text(datetime.fromtimestamp(t_), 0.66, glyph, ha="center", va="center",
+                           fontsize=9, color=INK, alpha=0.85)
+        aq = [(datetime.fromtimestamp(t_), v) for t_, v in zip(outside["ts"], outside["aqi"])
+              if v is not None]
+        if aq:
+            strip.scatter([a for a, _ in aq], [0.24] * len(aq), s=26,
+                          c=[_aqi_colour(v) for _, v in aq], alpha=1.0, linewidths=0)
+        key = [Line2D([], [], color=OUTSIDE, lw=1.2, ls=(0, (4, 3)), label="outside")]
+        key += [Line2D([], [], marker="o", ls="", ms=4.5, color=c, label=lab)
+                for lab, c in (("20", AQI_BANDS[0][1]), ("40", AQI_BANDS[1][1]),
+                               ("60", AQI_BANDS[2][1]), ("80+", AQI_BANDS[4][1]))]
+        strip.legend(handles=key, loc="upper right", fontsize=7, frameon=False,
+                     ncol=5, handletextpad=0.3, columnspacing=0.9, borderpad=0.2)
+        strip.set_ylim(0, 1)
+        strip.set_xmargin(0.01)
+        strip.set_yticks([])
+        strip.grid(False)
+        strip.set_ylabel("outside / AQI", fontsize=8, color=MUTED)
+        for side in ("top", "right", "left"):
+            strip.spines[side].set_visible(False)
+        strip.tick_params(axis="x", labelsize=8)
+
+    ax = strip if strip is not None else axes[-1, 0]
     ax.xaxis.set_major_locator(mdates.AutoDateLocator())
     ax.xaxis.set_major_formatter(
         mdates.DateFormatter("%H:%M:%S" if end - start <= 7200

@@ -82,6 +82,11 @@ dry one. Anything else is unsupported.
 
 `weather_enabled = false` restores the weather-blind rules.
 
+The graphs carry the same evidence: outside temperature and humidity are drawn as a dashed series
+over the indoor ones, and the strip beneath them marks the hour's weather and its air quality, so a
+swing can be judged on the chart instead of guessed at. If the history endpoints fail the chart
+still renders, just without the outside.
+
 A failed lookup is not allowed to blind the rules: the last good reading stands in for up to an
 hour (flagged `stale`), a failure is retried after two minutes rather than the usual fifteen, and
 the failure is logged to the journal. One blip used to silence the context for a quarter of an

@@ -6,6 +6,7 @@ in the room".
 """
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import time
@@ -89,3 +90,69 @@ def note(ctx: dict | None) -> str:
 
 def reset_cache() -> None:
     _cache.clear()
+
+
+def _get(url: str) -> dict | None:
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "tuya-monitor/1 (weather context)"})
+        with urllib.request.urlopen(req, timeout=20) as fh:
+            return json.loads(fh.read())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _hourly(url: str, keys: tuple[str, ...], start: int, end: int) -> dict[str, list]:
+    """Hourly series clipped to the window, as parallel lists of timestamps and values."""
+    out: dict[str, list] = {k: [] for k in keys}
+    out["ts"] = []
+    got = _get(url)
+    if not got:
+        return out
+    hourly = got.get("hourly") or {}
+    times = hourly.get("time") or []
+    for i, stamp in enumerate(times):
+        ts = int(datetime.datetime.strptime(stamp, "%Y-%m-%dT%H:%M").replace(
+            tzinfo=datetime.timezone.utc).timestamp())
+        if ts < start - 3600 or ts > end + 3600:
+            continue
+        out["ts"].append(ts)
+        for k in keys:
+            series = hourly.get(k) or []
+            out[k].append(series[i] if i < len(series) else None)
+    return out
+
+
+_hist_cache: dict[tuple, tuple[float, dict]] = {}
+HIST_TTL = 600
+
+
+def history(settings: config.Settings, start: int, end: int) -> dict | None:
+    """Outside conditions across a window: for the graph, never for an alert.
+
+    Returns hourly temperature, humidity, precipitation, WMO weather code and European AQI, or
+    None when the window is too far back or the lookup fails.
+    """
+    if not getattr(settings, "weather_enabled", False):
+        return None
+    days = min(92, max(1, int((time.time() - start) / 86400) + 2))
+    if time.time() - start > 92 * 86400:
+        return None
+    key = (start // 3600, end // 3600, days)
+    hit = _hist_cache.get(key)
+    if hit and time.time() - hit[0] < HIST_TTL:
+        return hit[1]
+    lat, lon = settings.weather_lat, settings.weather_lon
+    base = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+            f"&past_days={days}&forecast_days=1&timezone=UTC&hourly=")
+    data = _hourly(base + "temperature_2m,relative_humidity_2m,precipitation,weather_code",
+                   ("temperature_2m", "relative_humidity_2m", "precipitation", "weather_code"),
+                   start, end)
+    air = _hourly("https://air-quality-api.open-meteo.com/v1/air-quality"
+                  f"?latitude={lat}&longitude={lon}&past_days={days}&forecast_days=1"
+                  "&timezone=UTC&hourly=european_aqi", ("european_aqi",), start, end)
+    aqi_by_ts = dict(zip(air["ts"], air["european_aqi"]))
+    data["aqi"] = [aqi_by_ts.get(t) for t in data["ts"]]
+    if not data["ts"]:
+        return None
+    _hist_cache[key] = (time.time(), data)
+    return data

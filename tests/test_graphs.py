@@ -80,3 +80,47 @@ def test_prune_reports():
     import os
     os.utime(path, (old, old))
     assert graphs.prune_reports(30) == 1
+
+
+def test_weather_glyphs_are_mapped_from_wmo_codes():
+    assert graphs._symbol(0) == "☀"
+    assert graphs._symbol(3) == "☁"
+    assert graphs._symbol(61) == "☂"
+    assert graphs._symbol(75) == "❄"
+    assert graphs._symbol(95) == "⚡"
+    assert graphs._symbol(None) == ""
+
+
+def test_aqi_colour_steps_with_severity():
+    assert graphs._aqi_colour(10) != graphs._aqi_colour(50) != graphs._aqi_colour(120)
+
+
+def _stub_history(monkeypatch):
+    from monitor import weather
+
+    now = int(time.time())
+    monkeypatch.setattr(weather, "history", lambda s, a, b: {
+        "ts": [now - 3600, now],
+        "temperature_2m": [14.0, 12.0],
+        "relative_humidity_2m": [60.0, 70.0],
+        "precipitation": [0.0, 0.4],
+        "weather_code": [61.0, 63.0],
+        "aqi": [18.0, 46.0],
+    })
+
+
+def test_outside_series_gets_drawn(monkeypatch):
+    dev = seed()
+    _stub_history(monkeypatch)
+    now = int(time.time())
+    path = graphs.render(dev, now - 3600, now)
+    assert path.exists()
+
+
+def test_a_failed_history_lookup_still_renders(monkeypatch):
+    from monitor import weather
+
+    dev = seed()
+    monkeypatch.setattr(weather, "history", lambda s, a, b: None)
+    now = int(time.time())
+    assert graphs.render(dev, now - 3600, now).exists()
