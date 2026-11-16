@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 
-from . import config
+from . import config, store
 
 log = logging.getLogger("tuya-monitor.weather")
 
@@ -38,10 +38,12 @@ def _fetch(settings: config.Settings) -> dict | None:
             data = json.loads(fh.read())
         cur = data.get("current") or {}
         hourly = (data.get("hourly") or {}).get("precipitation") or []
-        return {"rh": float(cur.get("relative_humidity_2m") or 0.0),
-                "temp": float(cur.get("temperature_2m") or 0.0),
-                "precip": max([float(p or 0.0) for p in hourly] + [0.0]),
-                "ts": time.time()}
+        got = {"rh": float(cur.get("relative_humidity_2m") or 0.0),
+               "temp": float(cur.get("temperature_2m") or 0.0),
+               "precip": max([float(p or 0.0) for p in hourly] + [0.0]),
+               "ts": time.time()}
+        store.add_weather([(int(got["ts"]), got["temp"], got["rh"], got["precip"], None, None)])
+        return got
     except Exception:  # noqa: BLE001 - weather is context, never critical
         return None
 
@@ -50,6 +52,11 @@ def outdoor(settings: config.Settings) -> dict | None:
     """Cached outside conditions, or None when disabled/unavailable."""
     if not getattr(settings, "weather_enabled", False):
         return None
+    fresh = store.latest_weather(max_age=1200)
+    if fresh:
+        return {"rh": fresh["rh"], "temp": fresh["temp"], "precip": fresh["precip"] or 0.0,
+                "ts": fresh["ts"]}
+
     key = f"{settings.weather_lat},{settings.weather_lon}"
     hit = _cache.get(key)
     if hit:
@@ -101,11 +108,32 @@ def _get(url: str) -> dict | None:
         return None
 
 
+def _shape(rows: list[dict]) -> dict:
+    """Rows to the series shape the charts read."""
+    return {"ts": [r["ts"] for r in rows],
+            "temperature_2m": [r["temp"] for r in rows],
+            "relative_humidity_2m": [r["rh"] for r in rows],
+            "precipitation": [r["precip"] for r in rows],
+            "weather_code": [r["code"] for r in rows],
+            "aqi": [r["aqi"] for r in rows]}
+
+
+def _store(data: dict) -> None:
+    store.add_weather([(ts, tp, rh, pr, int(cd) if cd is not None else None, aq)
+                       for ts, tp, rh, pr, cd, aq in zip(data["ts"], data["temperature_2m"],
+                                                        data["relative_humidity_2m"],
+                                                        data["precipitation"], data["weather_code"],
+                                                        data["aqi"])])
+
+
 def _hourly(url: str, keys: tuple[str, ...], start: int, end: int) -> dict[str, list]:
     """Hourly series clipped to the window, as parallel lists of timestamps and values."""
     out: dict[str, list] = {k: [] for k in keys}
     out["ts"] = []
-    got = _get(url)
+    try:
+        got = _get(url)
+    except Exception:  # noqa: BLE001 - the chart must survive a broken lookup
+        got = None
     if not got:
         return out
     hourly = got.get("hourly") or {}
@@ -137,9 +165,16 @@ def history(settings: config.Settings, start: int, end: int) -> dict | None:
     days = min(92, max(1, int((time.time() - start) / 86400) + 2))
     if time.time() - start > 92 * 86400:
         return None
+    # hourly rows are stamped on the minute, so the window needs a little slack at its start
+    have = store.weather_series(start - 1800, end)
+    hours = max(1, (end - start) // 3600)
+    if len(have) >= hours * 0.6:
+        return _shape(have)
+
     key = (start // 3600, end // 3600, days)
     hit = _hist_cache.get(key)
     if hit and time.time() - hit[0] < HIST_TTL:
+        _store(hit[1])          # a cache hit does not mean the database already has it
         return hit[1]
     lat, lon = settings.weather_lat, settings.weather_lon
     base = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
@@ -152,6 +187,7 @@ def history(settings: config.Settings, start: int, end: int) -> dict | None:
                   "&timezone=UTC&hourly=european_aqi", ("european_aqi",), start, end)
     aqi_by_ts = dict(zip(air["ts"], air["european_aqi"]))
     data["aqi"] = [aqi_by_ts.get(t) for t in data["ts"]]
+    _store(data)
     if not data["ts"]:
         return None
     _hist_cache[key] = (time.time(), data)

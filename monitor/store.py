@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS alerts (
     acked_at   INTEGER,
     notified_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS weather (
+    ts     INTEGER PRIMARY KEY,
+    temp   REAL,
+    rh     REAL,
+    precip REAL,
+    code   INTEGER,
+    aqi    REAL
+);
 CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_alerts_open ON alerts(notified_at) WHERE notified_at IS NULL;
 """
@@ -254,6 +262,52 @@ def prune(dev_id: str, keep_days: int) -> int:
 
 
 # ---------------------------------------------------------------- alerts
+
+def add_weather(rows: Iterable[tuple[int, float | None, float | None, float | None,
+                                    int | None, float | None]]) -> int:
+    """Outside conditions by hour. Same hour twice is the same hour: keep the first."""
+    data = list(rows)
+    if not data:
+        return 0
+    with registry() as con:
+        con.executemany(
+            "INSERT OR IGNORE INTO weather(ts, temp, rh, precip, code, aqi) VALUES (?,?,?,?,?,?)",
+            data)
+    return len(data)
+
+
+def weather_series(start: int, end: int) -> list[dict]:
+    sql = ("SELECT ts, temp, rh, precip, code, aqi FROM weather WHERE ts BETWEEN ? AND ? "
+           "ORDER BY ts")
+    try:
+        with registry(write=False) as con:
+            return [dict(r) for r in con.execute(sql, (start, end))]
+    except sqlite3.OperationalError:
+        # a registry created before the table existed: the write handle runs the schema
+        with registry() as con:
+            return [dict(r) for r in con.execute(sql, (start, end))]
+
+
+def latest_weather(max_age: int = 3600) -> dict | None:
+    sql = "SELECT ts, temp, rh, precip, code, aqi FROM weather ORDER BY ts DESC LIMIT 1"
+    try:
+        with registry(write=False) as con:
+            row = con.execute(sql).fetchone()
+    except sqlite3.OperationalError:
+        with registry() as con:
+            row = con.execute(sql).fetchone()
+    if not row or time.time() - row["ts"] > max_age:
+        return None
+    return dict(row)
+
+
+def prune_weather(keep_days: int) -> int:
+    if keep_days <= 0:
+        return 0
+    cutoff = int(time.time()) - keep_days * 86400
+    with registry() as con:
+        return con.execute("DELETE FROM weather WHERE ts < ?", (cutoff,)).rowcount
+
 
 def add_alert(dev_id: str, dp: str, rule: str, severity: str, value: float | None,
               baseline: float | None, message: str) -> int:

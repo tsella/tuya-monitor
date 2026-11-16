@@ -82,6 +82,13 @@ dry one. Anything else is unsupported.
 
 `weather_enabled = false` restores the weather-blind rules.
 
+Outside conditions are stored, not just fetched: `weather` in the registry holds one row per hour
+(temperature, humidity, precipitation, WMO code, AQI), back-filled 14 days by
+`tuya-monitor-weather.timer` every ten minutes. The alert path prefers a stored reading under 20
+minutes old, so a brief network failure changes nothing; the chart reads the table and only calls
+open-meteo when a window has almost no rows. `monitor.cli weather --days N` back-fills by hand and
+`prune` ages the table out with the samples.
+
 The graphs carry the same evidence: outside temperature and humidity are drawn as a dashed series
 over the indoor ones, and the strip beneath them marks the hour's weather and its air quality, so a
 swing can be judged on the chart instead of guessed at. If the history endpoints fail the chart

@@ -9,6 +9,7 @@ Two kinds of database, on purpose.
 | `devices` | `dev_id` PK, `name`, `category`, `product_id`, `ip`, `local_key`, `version`, `dp_meta`, `enabled`, `paired_at`, `last_seen`, `last_error`, `failures` | `local_key` is secret; `dp_meta` is JSON dp→{name,unit,kind} |
 | `pair_sessions` | `id` PK, `token`, `created`, `expires`, `status`, `detail` | status: pending → approved / expired / failed |
 | `alerts` | `id`, `dev_id`, `dp`, `ts`, `rule`, `severity`, `value`, `baseline`, `message`, `acked_at`, `notified_at` | append-only |
+| `weather` | `ts` PK, `temp`, `rh`, `precip`, `code`, `aqi` | outside conditions, one row per hour, site-wide rather than per device; `ts` PK makes a refetch idempotent |
 
 ## `data/<dev_id>.db` — telemetry, one file per device
 
@@ -30,4 +31,7 @@ CREATE TABLE samples (
 
 - `local_key` and the whole `data/` tree are 600/700.
 - Samples never reference the registry; deleting `registry.db` loses pairing, not history.
+- `weather` is keyed by hour alone: a row is a fact about the place, not about a device, and is
+  never rewritten — `INSERT OR IGNORE` on the `ts` primary key. It is pruned on the same
+  retention as samples, and the alert path reads the newest row in preference to the network.
 - `latest()` joins on `MAX(ts)` per dp and is the only hot read path.

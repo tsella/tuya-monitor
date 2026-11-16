@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import anomaly, cloud, collector, config, graphs, realtime, store
+from . import anomaly, cloud, collector, config, graphs, realtime, store, weather
 
 
 def _log(level: str) -> None:
@@ -152,11 +152,27 @@ def cmd_notify(args) -> int:
     return 0
 
 
+def cmd_weather(args) -> int:
+    """Keep the outside record current, and backfill whatever the DB is missing."""
+    settings = config.load()
+    if not settings.weather_enabled:
+        print("weather disabled")
+        return 0
+    now = int(time.time())
+    start = now - args.days * 86400
+    before = len(store.weather_series(start, now))
+    weather.history(settings, start, now)
+    added = len(store.weather_series(start, now)) - before
+    print(f"weather: {added} hours added, {len(store.weather_series(start, now))} in the window")
+    return 0
+
+
 def cmd_prune(args) -> int:
     settings = config.load()
     n = sum(store.prune(d["dev_id"], settings.retention_days) for d in store.list_devices())
     r = graphs.prune_reports(settings.report_retention_days)
-    print(f"pruned {n} samples, {r} reports")
+    w = store.prune_weather(settings.retention_days)
+    print(f"pruned {n} samples, {r} reports, {w} weather hours")
     return 0
 
 
@@ -180,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
     n = sub.add_parser("notify"); n.add_argument("--json", action="store_true")
     n.add_argument("--limit", type=int, default=50); n.add_argument("--include-quiet", action="store_true"); n.add_argument("path", nargs="?", default=None)
     n.set_defaults(fn=cmd_notify)
+    wx = sub.add_parser("weather"); wx.add_argument("--days", type=int, default=14)
+    wx.set_defaults(fn=cmd_weather)
     sub.add_parser("prune").set_defaults(fn=cmd_prune)
 
     args = p.parse_args(argv)
