@@ -63,20 +63,26 @@ sitting inside the daily range, not an anomaly — move the edge, do not shorten
 
 ## Weather context
 
-The room follows the weather. A rainy day lifts indoor humidity 15–20 points and drops the
-temperature, which the baseline rule otherwise reads as an anomaly. So the collector fetches
-outside conditions (open-meteo, 15-minute cache, `weather_lat/lon`) and uses them:
+The outside reading is the evidence for an indoor deviation, so every baseline alert carries it and
+says which way it went. Warnings are never suppressed for weather — a weather-shaped wobble is
+still worth a line — but the verdict changes how hard the rule pushes:
 
-- rain or outdoor RH ≥ 65 % widens the humidity band 1.8× and raises the humidity edges by ten
-  points; wind and rain widen the temperature band 1.45×, and outside at 12 °C or below widens it
-  1.9× — a cold snap drags the room down and must not read as a fault;
-- every alert carries the outside reading, e.g. `(outside 88% RH, rain)`, so a later reader can
-  tell weather from a plumbing leak even after the fact.
+- **Supported** (the room moved the way the weather pushes: cold outside with a cold room, wet
+  outside with a humid room) — the band widens 1.9×, so only a larger supported swing fires at all.
+- **Unsupported** (an extreme inside while it is ordinary out: 80 °F indoors on a 68 °F day, a damp
+  room while it is dry out) — the band stays exactly as it was and the severity bar drops from
+  2.5× to 1.6×, because an unexplained extreme is the case worth waking up for.
+
+Messages read `(outside 20°C, 55% RH) — the outside does not account for it`, or `— in line with
+the outside`, so the reader sees the judgment instead of having to ask for the weather.
+
+Supported is decided against the hour's own median: temperature needs the outside 5 °C beyond it on
+the same side as the deviation; humidity needs 68 % or more for a damp room and 45 % or less for a
+dry one. Anything else is unsupported.
 
 `weather_enabled = false` restores the weather-blind rules.
 
 A failed lookup is not allowed to blind the rules: the last good reading stands in for up to an
 hour (flagged `stale`), a failure is retried after two minutes rather than the usual fifteen, and
-the failure is logged to the journal. Before that, one blip silenced the context for a quarter of
-an hour and let a cold-snap alert through unannotated — which is exactly the alert that opened
-this section.
+the failure is logged to the journal. One blip used to silence the context for a quarter of an
+hour — and a cold-snap alert went out bare because of it.

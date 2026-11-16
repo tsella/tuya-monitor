@@ -140,18 +140,34 @@ def evaluate(dev: dict, dps: dict[str, Any], settings: config.Settings,
 
         med, mad, n = _baseline(dev["dev_id"], dp, ts, settings.baseline_days)
         if n >= BASELINE_MIN_POINTS:
-            scale = 1.0
-            if kind == "humidity" and wet:
-                scale = 1.8
-            elif kind == "temp":
-                scale = 1.9 if cold else 1.45 if wet else 1.0
+            delta = value - med
+            # The outside is the evidence. An extreme inside that the weather corroborates is
+            # expected and quiet; an extreme inside while it is ordinary out is the anomaly.
+            # Supported: the room moved the way the weather would push it.
+            verdict = "unsupported"
+            if ctx:
+                if kind == "temp":
+                    if ctx["temp"] >= med + 5 and delta > 0:
+                        verdict = "supported"
+                    elif ctx["temp"] <= med - 5 and delta < 0:
+                        verdict = "supported"
+                elif kind == "humidity":
+                    if ctx["rh"] >= 68 and delta > 0:
+                        verdict = "supported"
+                    elif ctx["rh"] <= 45 and delta < 0:
+                        verdict = "supported"
+            scale = 1.9 if verdict == "supported" else 1.0
             band = max(BASELINE_MAD * mad, th.get("floor", 0.0)) * scale
-            if abs(value - med) > band:
+            if abs(delta) > band:
                 matched.add("baseline")
-                sev = "alert" if abs(value - med) > band * 2.5 else "warn"
+                # unsupported, it has to be louder: same band, lower bar for the alert severity
+                bar = 1.6 if verdict == "unsupported" else 2.5
+                sev = "alert" if abs(delta) > band * bar else "warn"
+                read = ("the outside does not account for it" if verdict == "unsupported"
+                        else "in line with the outside")
                 got = _emit(dev, dp, "baseline", sev, value, med,
                             f"{prefix} at {shown}, unusual for this hour "
-                            f"(median {_fmt(med, kind, unit, settings)}, {n} samples){outside}",
+                            f"(median {_fmt(med, kind, unit, settings)}, {n} samples){outside} — {read}",
                             settings)
                 if got:
                     out.append(got)

@@ -187,3 +187,46 @@ def test_a_stale_reading_expires(monkeypatch):
                                         {"rh": 71.0, "temp": 8.0, "precip": 0.0, "ts": 0})
     monkeypatch.setattr(w, "_fetch", lambda settings: None)
     assert w.outdoor(s) is None
+
+
+def _ctx(temp, rh, now=None):
+    return {"rh": rh, "temp": temp, "precip": 0.0, "ts": now or int(time.time())}
+
+
+def test_warm_room_on_an_ordinary_day_is_called_out(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "18", 22.0))
+    # 26.7 indoors (80 F) while it is 20 outside (68 F): nothing out there explains it
+    monkeypatch.setattr(anomaly.weather, "outdoor", lambda s: _ctx(20.0, 55.0, now))
+    got = [g for g in anomaly.evaluate(dev, {"18": 26.7}, settings, ts=now) if g["rule"] == "baseline"]
+    assert got, "an unexplained warm room has to fire"
+    assert "does not account for it" in got[0]["message"]
+    assert "outside 20°C" in got[0]["message"]
+
+
+def test_unsupported_swing_reaches_alert_sooner(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "18", 22.0))
+    monkeypatch.setattr(anomaly.weather, "outdoor", lambda s: _ctx(20.0, 55.0, now))
+    got = [g for g in anomaly.evaluate(dev, {"18": 30.0}, settings, ts=now) if g["rule"] == "baseline"]
+    assert got and got[0]["severity"] == "alert"
+
+
+def test_humid_room_while_dry_outside_is_called_out(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "19", 38.0))
+    monkeypatch.setattr(anomaly.weather, "outdoor", lambda s: _ctx(20.0, 35.0, now))
+    got = [g for g in anomaly.evaluate(dev, {"19": 55.0}, settings, ts=now) if g["rule"] == "baseline"]
+    assert got and "does not account for it" in got[0]["message"]
+
+
+def test_humid_room_while_wet_outside_is_expected(settings, monkeypatch):
+    dev = make_dev()
+    now = int(time.time())
+    store.insert_samples("dev1", _baseline_rows(now, "19", 38.0))
+    monkeypatch.setattr(anomaly.weather, "outdoor", lambda s: _ctx(20.0, 90.0, now))
+    got = [g for g in anomaly.evaluate(dev, {"19": 55.0}, settings, ts=now) if g["rule"] == "baseline"]
+    assert got == []
