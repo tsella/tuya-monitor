@@ -138,9 +138,12 @@ def _hourly(url: str, keys: tuple[str, ...], start: int, end: int) -> dict[str, 
         return out
     hourly = got.get("hourly") or {}
     times = hourly.get("time") or []
+    # the request asks for UTC, but honour the offset in the reply so switching the parameter
+    # to `auto` cannot shift every stored hour by the local offset without saying so
+    shift = int(got.get("utc_offset_seconds") or 0)
     for i, stamp in enumerate(times):
-        ts = int(datetime.datetime.strptime(stamp, "%Y-%m-%dT%H:%M").replace(
-            tzinfo=datetime.timezone.utc).timestamp())
+        ts = int((datetime.datetime.strptime(stamp, "%Y-%m-%dT%H:%M")
+                  .replace(tzinfo=datetime.timezone.utc).timestamp())) - shift
         if ts < start - 3600 or ts > end + 3600:
             continue
         out["ts"].append(ts)

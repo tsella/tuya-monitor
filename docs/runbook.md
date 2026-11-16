@@ -61,6 +61,25 @@ are config values; `config.example.toml` documents the defaults.
 Symptom to watch for: a rule re-firing on the same value every cooldown. That is a threshold
 sitting inside the daily range, not an anomaly — move the edge, do not shorten the cooldown.
 
+## Time and daylight saving
+
+Everything is stored as epoch seconds, so a clock change never rewrites history and no row is ever
+duplicated or lost when the zone shifts. Wall clocks are only ever a rendering choice:
+
+- the baseline hour is the *local* hour in `timezone` (default `America/New_York`), not the UTC
+  hour. A window that contains a clock change therefore selects two UTC hours for the same local
+  hour and pools both, so a baseline does not jump a bucket when the clocks move;
+- the spring-forward hour has one day fewer in its window and the autumn hour has two copies. Both
+  are handled by the same pool — the 12-point minimum is met from the other days either way;
+- charts format in `timezone` and name the zone in the title (`%Z`, so it says EST or EDT rather
+  than lying). A week spanning a change prints the repeated hour twice, which is what the clock did;
+- outside weather is requested in UTC and additionally corrected by `utc_offset_seconds` from the
+  reply, so flipping that request to `timezone=auto` cannot shift every stored hour by four or
+  five hours without complaint.
+
+Changing `timezone` re-labels the baselines but does not move the data. A bad zone falls back to
+UTC and logs nothing — the rules keep running rather than stopping.
+
 ## Weather context
 
 The outside reading is the evidence for an indoor deviation, so every baseline alert carries it and

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from zoneinfo import ZoneInfo
 
 import numpy as np
 from datetime import datetime
@@ -123,6 +124,12 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
     if outside and not outside["ts"]:
         outside = None
 
+    try:
+        zone = ZoneInfo(settings.timezone)
+    except Exception:  # noqa: BLE001 - fall back rather than lose the chart
+        zone = ZoneInfo("UTC")
+    plt.rcParams["timezone"] = str(zone)
+
     plt.rcParams.update({
         "figure.facecolor": BG, "axes.facecolor": BG, "savefig.facecolor": BG,
         "text.color": INK, "axes.labelcolor": INK, "xtick.color": MUTED,
@@ -147,7 +154,7 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
             xform = lambda v: v  # noqa: E731
             unit = "°C" if kind == "temp" else meta.get("unit", "")
 
-        ts = [datetime.fromtimestamp(r["t"]) for r in rows]
+        ts = [datetime.fromtimestamp(r["t"], zone) for r in rows]
         lo = [xform(r["lo"]) for r in rows]
         hi = [xform(r["hi"]) for r in rows]
         avg = [xform(r["avg"]) for r in rows]
@@ -159,7 +166,7 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
         if outside:
             key = "temperature_2m" if kind == "temp" else "relative_humidity_2m" if kind == "humidity" else None
             if key:
-                pts = [(datetime.fromtimestamp(t), xform(v)) for t, v in zip(outside["ts"], outside[key])
+                pts = [(datetime.fromtimestamp(t, zone), xform(v)) for t, v in zip(outside["ts"], outside[key])
                        if v is not None]
                 if pts:
                     xs, ys = zip(*pts)
@@ -208,9 +215,9 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
         for t_, code in list(zip(outside["ts"], outside["weather_code"]))[::step]:
             glyph = _symbol(code)
             if glyph:
-                strip.text(datetime.fromtimestamp(t_), 0.66, glyph, ha="center", va="center",
+                strip.text(datetime.fromtimestamp(t_, zone), 0.66, glyph, ha="center", va="center",
                            fontsize=9, color=INK, alpha=0.85)
-        aq = [(datetime.fromtimestamp(t_), v) for t_, v in zip(outside["ts"], outside["aqi"])
+        aq = [(datetime.fromtimestamp(t_, zone), v) for t_, v in zip(outside["ts"], outside["aqi"])
               if v is not None]
         if aq:
             strip.scatter([a for a, _ in aq], [0.24] * len(aq), s=26,
@@ -238,12 +245,13 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
     ax.xaxis.get_offset_text().set_visible(False)
     ax.tick_params(axis="x", labelsize=8)
 
-    start_s = time.strftime("%Y-%m-%d %H:%M", time.localtime(start))
-    end_s = time.strftime("%Y-%m-%d %H:%M", time.localtime(end))
+    start_dt = datetime.fromtimestamp(start, zone)
+    end_s = datetime.fromtimestamp(end, zone).strftime("%Y-%m-%d %H:%M")
     first = min(p[1][0]["t"] for p in panels)
-    lag = " · first sample " + time.strftime("%H:%M:%S", time.localtime(first)) if first - start > 300 else ""
-    tz = time.strftime("%Z", time.localtime(start))
-    fig.suptitle(f"{dev['name']} — window {start_s} → {end_s} {tz}{lag}"
+    lag = (" · first sample " + datetime.fromtimestamp(first, zone).strftime("%H:%M:%S")
+           if first - start > 300 else "")
+    tz = start_dt.strftime("%Z")
+    fig.suptitle(f"{dev['name']} — window {start_dt.strftime('%Y-%m-%d %H:%M')} → {end_s} {tz}{lag}"
                  f"{(' · ' + title_suffix) if title_suffix else ''}",
                  x=0.01, ha="left", fontsize=11, color=INK)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
@@ -252,7 +260,7 @@ def render(dev: dict, start: int, end: int, dps: list[str] | None = None,
     target_dir.mkdir(parents=True, exist_ok=True)
     span = end - start
     unit_name = f"{span // 3600}h" if span >= 3600 else f"{max(span // 60, 1)}m"
-    name = (f"{dev['dev_id']}_{time.strftime('%Y%m%dT%H%M', time.localtime(start))}_"
+    name = (f"{dev['dev_id']}_{start_dt.strftime('%Y%m%dT%H%M')}_"
             f"{unit_name}{('_' + title_suffix) if title_suffix else ''}.png")
     path = target_dir / name
     fig.savefig(path, dpi=130, bbox_inches="tight")

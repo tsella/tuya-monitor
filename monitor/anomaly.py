@@ -7,9 +7,11 @@ cool down hardest — "unusual for this hour" is the rule most likely to cry wol
 """
 from __future__ import annotations
 
+import datetime
 import statistics
 import time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from . import config, realtime, store, weather
 
@@ -38,20 +40,41 @@ def reset_streaks(dev_id: str | None = None) -> None:
         _streaks.pop(key, None)
 
 
-def _baseline(dev_id: str, dp: str, ts: int, days: int) -> tuple[float, float, int]:
-    """Median and MAD of this hour-of-day over previous days.
+def _zone(settings: config.Settings):
+    try:
+        return ZoneInfo(settings.timezone)
+    except Exception:  # noqa: BLE001 - a bad zone must not stop the rule
+        return ZoneInfo("UTC")
+
+
+def _baseline(dev_id: str, dp: str, ts: int, days: int,
+              settings: config.Settings) -> tuple[float, float, int]:
+    """Median and MAD of this local hour over previous days.
 
     The window is at least 14 days: a device sampled once an hour yields only one point
     per day, and a 7-day window can never reach the 12-point minimum on its own.
+
+    Hours are the *local* hour in the configured zone, not UTC, so the median matches the
+    hour a person would name. DST is handled by asking the zone for the UTC offsets in play
+    at this point and a week and a fortnight back: a clock change inside the window yields
+    two candidate UTC hours and both are pooled, so the repeated autumn hour and the spring
+    hour that the clock skips neither shift the baseline onto its neighbour.
     """
-    hour = (ts % 86400) // 3600
+    zone = _zone(settings)
+    here = datetime.datetime.fromtimestamp(ts, zone)
+    local_hour = here.hour
+    offsets = {int(d.utcoffset().total_seconds())
+               for d in (here, here - datetime.timedelta(days=7),
+                         here - datetime.timedelta(days=14))}
+    hours = sorted({(local_hour - off // 3600) % 24 for off in offsets})
+    marks = ",".join("?" * len(hours))
     window = max(days, 14)
     lo = ts - window * 86400 - 1800
     hi = ts - 1800
     with store.telemetry(dev_id, write=False) as con:
         rows = con.execute(
             "SELECT num FROM samples WHERE dp=? AND num IS NOT NULL AND ts BETWEEN ? AND ? "
-            "AND ((ts % 86400) / 3600) = ?", (dp, lo, hi, hour)).fetchall()
+            f"AND ((ts % 86400) / 3600) IN ({marks})", (dp, lo, hi, *hours)).fetchall()
     vals = [r[0] for r in rows if r[0] is not None]
     if len(vals) < 12:
         return (0.0, 0.0, len(vals))
@@ -138,7 +161,7 @@ def evaluate(dev: dict, dps: dict[str, Any], settings: config.Settings,
             if got:
                 out.append(got)
 
-        med, mad, n = _baseline(dev["dev_id"], dp, ts, settings.baseline_days)
+        med, mad, n = _baseline(dev["dev_id"], dp, ts, settings.baseline_days, settings)
         if n >= BASELINE_MIN_POINTS:
             delta = value - med
             # The outside is the evidence. An extreme inside that the weather corroborates is

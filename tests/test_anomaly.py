@@ -1,3 +1,4 @@
+import datetime
 import time
 
 import pytest
@@ -230,3 +231,50 @@ def test_humid_room_while_wet_outside_is_expected(settings, monkeypatch):
     monkeypatch.setattr(anomaly.weather, "outdoor", lambda s: _ctx(20.0, 90.0, now))
     got = [g for g in anomaly.evaluate(dev, {"19": 55.0}, settings, ts=now) if g["rule"] == "baseline"]
     assert got == []
+
+
+def test_baseline_hour_is_local_not_utc(settings):
+    """The hour bucket has to be the hour a person would name, in the configured zone."""
+    from zoneinfo import ZoneInfo
+
+    settings.timezone = "America/New_York"
+    dev = make_dev()
+    zone = ZoneInfo("America/New_York")
+    now = datetime.datetime(2026, 11, 16, 9, 30, tzinfo=zone)
+    ts = int(now.timestamp())
+    # 09:00 local on each of the last ten days, plus 09:00 UTC on one day (14:00 local)
+    rows = []
+    for d in range(1, 15):
+        rows.append((int((now - datetime.timedelta(days=d)).replace(
+            hour=9, minute=5).timestamp()), "18", 22.0, None))
+    rows.append((int(datetime.datetime(2026, 11, 10, 9, 0, tzinfo=datetime.timezone.utc)
+                      .timestamp()), "18", 40.0, None))
+    store.insert_samples("dev1", rows)
+
+    med, _, n = anomaly._baseline("dev1", "18", ts, 14, settings)
+    assert n == 14, "the 09:00 UTC row is 14:00 local and must not join the 09:00 bucket"
+    assert med == 22.0
+
+
+def test_baseline_pools_both_sides_of_a_clock_change(settings):
+    """Fall back repeats 01:00; the baseline must take both copies, not jump an hour."""
+    from zoneinfo import ZoneInfo
+
+    settings.timezone = "America/New_York"
+    make_dev()
+    zone = ZoneInfo("America/New_York")
+    # 01:30 local on the day after the 2026-11-01 fall back, so 7 days and 14 back straddle it
+    now = datetime.datetime(2026, 11, 8, 1, 30, tzinfo=zone)
+    ts = int(now.timestamp())
+    rows = []
+    for d in range(1, 15):
+        rows.append((int((now - datetime.timedelta(days=d)).replace(
+            hour=1, minute=5).timestamp()), "18", 22.0, None))
+    store.insert_samples("dev1", rows)
+
+    _, _, n = anomaly._baseline("dev1", "18", ts, 14, settings)
+    with store.telemetry("dev1", write=False) as con:
+        hours = {r[0] for r in con.execute(
+            "SELECT DISTINCT ((ts % 86400) / 3600) FROM samples WHERE dp='18'")}
+    assert hours == {5, 6}, "one 01:00 is EDT, the other EST"
+    assert n >= 13, "both offsets have to be pooled into the same baseline"

@@ -48,3 +48,20 @@ def test_weather_prune_drops_old_hours():
     old = int(time.time()) - 40 * 86400
     store.add_weather([(old, 5.0, 50.0, 0.0, 0, 10.0)])
     assert store.prune_weather(30) == 1
+
+
+def test_a_local_time_reply_is_shifted_back_to_absolutetime(monkeypatch):
+    """Switching the request to `timezone=auto` must not shift every stored hour."""
+    from monitor import weather as w
+
+    _wipe_weather()
+    now = int(time.time())
+    local = time.strftime("%Y-%m-%dT%H:%M", time.gmtime(now - 3600 - 18000))
+    payload = {"utc_offset_seconds": -18000, "hourly": {
+        "time": [local], "temperature_2m": [9.0], "relative_humidity_2m": [70.0],
+        "precipitation": [0.0], "weather_code": [3]}}
+    monkeypatch.setattr(w, "_get", lambda url: payload if "air-quality" not in url else {})
+    w._hist_cache.clear()
+    w.history(config.Settings(), now - 7200, now)
+    rows = store.weather_series(now - 7200, now)
+    assert rows and abs(rows[0]["ts"] - (now - 3600)) <= 60

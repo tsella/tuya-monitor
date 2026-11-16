@@ -8,4 +8,4 @@ report_retention_days = 30
 cooldown_min = 30
 baseline_days = 7
 anomaly_enabled = true
-timezone = "America/New_York"
+timezone = "America/New_York"   # local hour for the baseline and every label; data stays epoch
